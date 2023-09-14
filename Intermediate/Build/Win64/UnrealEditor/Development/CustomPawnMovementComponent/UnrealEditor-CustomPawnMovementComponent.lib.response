@@ -1,0 +1,12 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UnrealEditor-CustomPawnMovementComponent.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"E:\AQ\Intermediate\Build\Win64\AQEditor\Development\Engine\SharedPCH.Engine.ShadowErrors.h.obj"
+"E:\AQ\Plugins\CustomPawnMovementComponent\Intermediate\Build\Win64\UnrealEditor\Development\CustomPawnMovementComponent\Module.CustomPawnMovementComponent.cpp.obj"
+"E:\AQ\Plugins\CustomPawnMovementComponent\Intermediate\Build\Win64\UnrealEditor\Development\CustomPawnMovementComponent\Default.rc2.res"
+/OUT:"E:\AQ\Plugins\CustomPawnMovementComponent\Intermediate\Build\Win64\UnrealEditor\Development\CustomPawnMovementComponent\UnrealEditor-CustomPawnMovementComponent.lib"
