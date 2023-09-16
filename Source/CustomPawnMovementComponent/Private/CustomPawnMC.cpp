@@ -22,7 +22,7 @@ UCustomPawnMC::UCustomPawnMC()
 void UCustomPawnMC::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
 	FloorTrace();
 }
 
@@ -34,6 +34,68 @@ bool UCustomPawnMC::CanStartPathFollowing() const
 bool UCustomPawnMC::CanStopPathFollowing() const
 {
 	return !bIsFalling;
+}
+
+void UCustomPawnMC::Walk(float DeltaTime)
+{
+	FloorTrace();
+	const FVector Delta = Velocity * DeltaTime;
+	if (!Delta.IsNearlyZero(1e-6f))
+	{
+		const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+		const FQuat Rotation = UpdatedComponent->GetComponentQuat();
+
+		FHitResult Hit(1.f);
+		FVector RampVector = ComputeGroundMovementDelta(Delta, CurrentFloorNormal);
+
+		SafeMoveUpdatedComponent(RampVector, Rotation, true, Hit);
+
+		if (Hit.IsValidBlockingHit())
+		{
+			HandleImpact(Hit, DeltaTime, Delta);
+			// Try to slide the remaining distance along the surface.
+			SlideAlongSurface(Delta, 1.f - Hit.Time, Hit.Normal, Hit, true);
+		}
+
+		// Update velocity
+		// We don't want position changes to vastly reverse our direction (which can happen due to penetration fixups etc)
+		if (!bPositionCorrected)
+		{
+			const FVector NewLocation = UpdatedComponent->GetComponentLocation();
+			Velocity = ((NewLocation - OldLocation) / DeltaTime);
+		}
+	}
+}
+
+void UCustomPawnMC::Fall(float DeltaTime)
+{
+	IPathFollowingAgentInterface* PFAgent = GetPathFollowingAgent();
+	if (PFAgent)
+	{
+		PFAgent->OnStartedFalling();
+	}
+	Velocity = ApplyGravity(Velocity, FVector(0.0, 0.0, -980.0), DeltaTime * FallScale);
+	const FQuat Rotation = UpdatedComponent->GetComponentQuat();
+	const FVector Delta = Velocity * DeltaTime * FallScale;
+	FHitResult Hit(1.f);
+	SafeMoveUpdatedComponent(Delta, Rotation, true, Hit);
+	if (Hit.IsValidBlockingHit())
+	{
+		HandleImpact(Hit, DeltaTime, Delta);
+		FloorTrace();
+		if (CustomPawnMovementMode != Falling)
+		{
+			ICMCInterface* Interface = Cast<ICMCInterface>(PawnOwner);
+			if (Interface)
+			{
+				Interface->OnLanded(Hit);
+			}
+			if (PFAgent)
+			{
+				PFAgent->OnLanded();
+			}
+		}
+	}
 }
 
 FVector UCustomPawnMC::ApplyGravity(const FVector& InitialVelocity, const FVector& Gravity, float DeltaTime) const
@@ -56,7 +118,6 @@ FVector UCustomPawnMC::ApplyGravity(const FVector& InitialVelocity, const FVecto
 			}
 		}*/
 	}
-	//UE_LOG(LogTemp, Warning, TEXT("Result %s"), *Result.ToString());
 
 	return Result;
 }
@@ -68,22 +129,21 @@ void UCustomPawnMC::FloorTrace()
 	FCollisionResponseParams ResponseParam;
 	InitCollisionParams(QueryParams, ResponseParam);
 	const ECollisionChannel CollisionChannel = UpdatedComponent->GetCollisionObjectType();
-	float ShapeRadius = CapsuleComponent->GetScaledCapsuleRadius() * 0.99f;
-	FVector TraceStart = CapsuleComponent->GetComponentLocation();
-	FVector TraceEnd = TraceStart - FVector(0.f, 0.f, CapsuleComponent->GetScaledCapsuleHalfHeight() + 20.f);
-	bool bIsBlocking = GetWorld()->SweepSingleByChannel(Hit, TraceStart,
-														TraceEnd, UpdatedComponent->GetComponentQuat(),
-														CollisionChannel,
-														FCollisionShape::MakeSphere(ShapeRadius), QueryParams, ResponseParam);
+	const float ShapeRadius = CapsuleComponent->GetScaledCapsuleRadius() * 0.99f;
+	const FVector TraceStart = CapsuleComponent->GetComponentLocation();
+	const FVector TraceEnd = TraceStart - FVector(0.f, 0.f, CapsuleComponent->GetScaledCapsuleHalfHeight() + 2.4f);
+	const bool bIsBlocking = GetWorld()->SweepSingleByChannel(Hit, TraceStart,
+	                                                          TraceEnd, UpdatedComponent->GetComponentQuat(),
+	                                                          CollisionChannel,
+	                                                          FCollisionShape::MakeSphere(ShapeRadius), QueryParams, ResponseParam);
 
-	//UE_LOG(LogTemp, Warning, TEXT("Blocking : %s"), bIsBlocking ? TEXT("True") : TEXT("False"));
-	bIsBlocking ? bIsFalling = false : bIsFalling = true;
+	bIsBlocking ? SetMovementMode(Walking) : SetMovementMode(Falling);
 	CurrentFloorNormal = Hit.Normal;
 }
 
-FVector UCustomPawnMC::ComputeGroundMovementDelta(const FVector& Delta, const FVector& RampNormal, const bool bHitFromLineTrace) const
+FVector UCustomPawnMC::ComputeGroundMovementDelta(const FVector& Delta, const FVector& RampNormal) const
 {
-	if (RampNormal.Z < (1.f - KINDA_SMALL_NUMBER) && RampNormal.Z > KINDA_SMALL_NUMBER && !bHitFromLineTrace)
+	if (RampNormal.Z < (1.f - KINDA_SMALL_NUMBER) && RampNormal.Z > KINDA_SMALL_NUMBER)
 	{
 		// Compute a vector that moves parallel to the surface, by projecting the horizontal movement direction onto the ramp.
 		const float FloorDotDelta = (RampNormal | Delta);
@@ -108,7 +168,7 @@ void UCustomPawnMC::InitializeComponent()
 {
 	Super::InitializeComponent();
 
-	if (UpdatedComponent == NULL){ return; }
+	if (UpdatedComponent == NULL) { return; }
 
 	CapsuleComponent = Cast<UCapsuleComponent>(UpdatedComponent);
 	SetUpdatedComponent(CapsuleComponent);
@@ -131,30 +191,18 @@ void UCustomPawnMC::HandleImpact(const FHitResult& Hit, float TimeSlice, const F
 
 	if (bEnablePhysicsInteraction && Hit.GetComponent()->Mobility == EComponentMobility::Movable && Hit.GetComponent()->IsSimulatingPhysics())
 	{
-		FVector ImpulseDir = -Hit.Normal;
+		const FVector ImpulseDir = -Hit.Normal;
 
 		if (bHitForceScaledToMass)
 		{
-			FBodyInstance* BI = Hit.GetComponent()->GetBodyInstance();
+			const FBodyInstance* BI = Hit.GetComponent()->GetBodyInstance();
 			TouchForceFactorModified *= BI ? BI->GetBodyMass() : 1.0f;
 		}
 
-		float ImpulseStrength = Velocity.Size() * TouchForceFactorModified;
-
-		FVector Impulse = ImpulseDir * ImpulseStrength;
-		/*float dot = FVector::DotProduct(HitNormal, CapsuleComponent->GetUpVector());
-
-		if (dot > 0.99f && !bAllowDownwardForce)
-		{
-			return;
-		}*/
-
+		const float ImpulseStrength = Velocity.Size() * TouchForceFactorModified;
+		const FVector Impulse = ImpulseDir * ImpulseStrength;
 		Hit.GetComponent()->AddImpulseAtLocation(Impulse, Hit.Location);
 	}
-}
-
-void UCustomPawnMC::ApplyImpactPhysicsForces(const FHitResult& Impact, const FVector& ImpactAcceleration, const FVector& ImpactVelocity)
-{
 }
 
 void UCustomPawnMC::LaunchPawn(FVector LaunchVelocity, bool bXYOverride, bool bZOverride)
@@ -175,10 +223,18 @@ void UCustomPawnMC::LaunchPawn(FVector LaunchVelocity, bool bXYOverride, bool bZ
 	bIsFalling = true;
 }
 
+void UCustomPawnMC::SetMovementMode(const ECustomPawnMovementMode NewMovementMode)
+{
+	if (CustomPawnMovementMode != NewMovementMode)
+	{
+		CustomPawnMovementMode = NewMovementMode;
+	}
+}
+
 // Called every frame
 void UCustomPawnMC::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-if (ShouldSkipUpdate(DeltaTime))
+	if (ShouldSkipUpdate(DeltaTime))
 	{
 		return;
 	}
@@ -201,85 +257,39 @@ if (ShouldSkipUpdate(DeltaTime))
 		}
 		// if it's not player controller, but we do have a controller, then it's AI
 		// (that's not following a path) and we need to limit the speed
-		/*else if (IsExceedingMaxSpeed(MaxSpeed) == true)
+		else if (IsExceedingMaxSpeed(MaxSpeed) == true)
 		{
 			Velocity = Velocity.GetUnsafeNormal() * MaxSpeed;
-		}*/
+		}
 
 		LimitWorldBounds();
 		bPositionCorrected = false;
+
 		// Move actor
-		FVector Delta = Velocity * DeltaTime;
-		if(bIsLaunched)
+		if (bIsLaunched)
 		{
 			Velocity = PendingLaunchVelocity;
 			PendingLaunchVelocity = FVector::ZeroVector;
 			bIsLaunched = false;
 		}
 
-		if (!bIsFalling)
+		switch (CustomPawnMovementMode)
 		{
-			FloorTrace();
-			if (!Delta.IsNearlyZero(1e-6f))
-			{
-				const FVector OldLocation = UpdatedComponent->GetComponentLocation();
-				const FQuat Rotation = UpdatedComponent->GetComponentQuat();
-
-				FHitResult Hit(1.f);
-				FVector RampVector = ComputeGroundMovementDelta(Delta, CurrentFloorNormal, false);
-
-				SafeMoveUpdatedComponent(RampVector, Rotation, true, Hit);
-				
-				if (Hit.IsValidBlockingHit())
-				{
-					HandleImpact(Hit, DeltaTime, Delta);
-					// Try to slide the remaining distance along the surface.
-					SlideAlongSurface(Delta, 1.f - Hit.Time, Hit.Normal, Hit, true);
-				}
-
-				// Update velocity
-				// We don't want position changes to vastly reverse our direction (which can happen due to penetration fixups etc)
-				if (!bPositionCorrected)
-				{
-					const FVector NewLocation = UpdatedComponent->GetComponentLocation();
-					Velocity = ((NewLocation - OldLocation) / DeltaTime);
-				}
-			}
+		case Walking:
+			Walk(DeltaTime);
+			break;
+		case Falling:
+			Fall(DeltaTime);
+			break;
+		default:
+			break;
 		}
-		else
-		{
-			IPathFollowingAgentInterface* PFAgent = GetPathFollowingAgent();
-			if (PFAgent)
-			{
-				PFAgent->OnStartedFalling();
-			}
-			Velocity = ApplyGravity(Velocity, FVector(0.0, 0.0, -980.0), DeltaTime * FallScale);
-			const FQuat Rotation = UpdatedComponent->GetComponentQuat();
-			Delta = Velocity * DeltaTime * FallScale;
-			FHitResult Hit(1.f);
-			SafeMoveUpdatedComponent(Delta, Rotation, true, Hit);
-			if (Hit.IsValidBlockingHit())
-			{
-				HandleImpact(Hit, DeltaTime, Delta);
-				FloorTrace();
-				if(!bIsFalling)
-				{
-					ICMCInterface* Interface = Cast<ICMCInterface>(PawnOwner);
-					if(Interface)
-					{
-						Interface->OnLanded(Hit);
-					}
-				}
-				PFAgent->OnLanded();
-				return;
-			}
-		}
+
 		// Finalize
 		UpdateComponentVelocity();
 	}
-	if(bEnableDebug)
+	if (bEnableDebug)
 	{
 		DrawDebugLine(GetWorld(), CapsuleComponent->GetComponentLocation(), CapsuleComponent->GetComponentLocation() + Velocity, FColor::Red, false, -1, 0, 5.f);
 	}
 }
-
