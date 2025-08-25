@@ -14,7 +14,7 @@ enum ECustomPawnMovementMode
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class CUSTOMPAWNMOVEMENTCOMPONENT_API UCustomPawnMC : public UFloatingPawnMovement
+class CUSTOMPAWNMOVEMENTCOMPONENT_API UCustomPawnMC : public UFloatingPawnMovement, public IRVOAvoidanceInterface
 {
 	GENERATED_BODY()
 
@@ -28,6 +28,24 @@ protected:
 
 	virtual bool CanStartPathFollowing() const override;
 	virtual bool CanStopPathFollowing() const override;
+
+/** BEGIN IRVOAvoidanceInterface */
+	ENGINE_API virtual void SetRVOAvoidanceUID(int32 UID) override;
+	ENGINE_API virtual int32 GetRVOAvoidanceUID() override;
+	ENGINE_API virtual void SetRVOAvoidanceWeight(float Weight) override;
+	ENGINE_API virtual float GetRVOAvoidanceWeight() override;
+	ENGINE_API virtual FVector GetRVOAvoidanceOrigin() override;
+	ENGINE_API virtual float GetRVOAvoidanceRadius() override;
+	ENGINE_API virtual float GetRVOAvoidanceHeight() override;
+	ENGINE_API virtual float GetRVOAvoidanceConsiderationRadius() override;
+	ENGINE_API virtual FVector GetVelocityForRVOConsideration() override;
+	ENGINE_API virtual void SetAvoidanceGroupMask(int32 GroupFlags) override;
+	ENGINE_API virtual int32 GetAvoidanceGroupMask() override;
+	ENGINE_API virtual void SetGroupsToAvoidMask(int32 GroupFlags) override;
+	ENGINE_API virtual int32 GetGroupsToAvoidMask() override;
+	ENGINE_API virtual void SetGroupsToIgnoreMask(int32 GroupFlags) override;
+	ENGINE_API virtual int32 GetGroupsToIgnoreMask() override;
+	/** END IRVOAvoidanceInterface */
 
 	void Walk(float DeltaTime);
 	void Fall(float DeltaTime);
