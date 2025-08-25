@@ -79,6 +79,26 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bEnableDebug = false;
 
+
+	UPROPERTY(Category="Pawn Movement: Avoidance", VisibleAnywhere, BlueprintReadOnly, AdvancedDisplay)
+	int32 AvoidanceUID;
+
+	/** Moving actor's group mask */
+	UPROPERTY(Category="Pawn Movement: Avoidance", EditAnywhere, BlueprintReadOnly, AdvancedDisplay)
+	FNavAvoidanceMask AvoidanceGroup;
+	
+	UPROPERTY(Category="Pawn Movement: Avoidance", EditAnywhere, BlueprintReadOnly)
+	float AvoidanceWeight;
+
+	UPROPERTY(Category="Pawn Movement: Avoidance", EditAnywhere, BlueprintReadOnly, AdvancedDisplay)
+	FNavAvoidanceMask GroupsToAvoid;
+
+	UPROPERTY(Category="Pawn Movement: Avoidance", EditAnywhere, BlueprintReadOnly, AdvancedDisplay)
+	FNavAvoidanceMask GroupsToIgnore;
+
+	UPROPERTY(Category="Pawn Movement: Avoidance", EditAnywhere, BlueprintReadOnly, meta=(ForceUnits=cm))
+	float AvoidanceConsiderationRadius;
+
 public:
 	virtual bool IsFalling() const override;
 	virtual void InitializeComponent() override;
